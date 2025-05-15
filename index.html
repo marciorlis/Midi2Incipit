@@ -1,1 +1,296 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MIDI2INCIPIT</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f4f4f8;
+      margin: 0;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .container {
+      background: white;
+      padding: 2rem;
+      border-radius: 1rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+      max-width: 700px;
+      width: 100%;
+      text-align: center;
+    }
+
+    img.logo {
+      height: 80px;
+      margin-bottom: 1rem;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 2rem;
+    }
+
+    h2 {
+      margin-top: 0.25rem;
+      font-size: 1.1rem;
+      font-weight: 400;
+      color: #666;
+    }
+
+    select, button {
+      padding: 0.5rem;
+      margin: 0.5rem;
+      font-size: 1rem;
+      border: none;
+      border-radius: 0.5rem;
+    }
+
+    textarea {
+      width: 100%;
+      height: 100px;
+      font-size: 3.0rem;
+      margin-top: 1rem;
+      padding: 0.5rem;
+      border-radius: 0.5rem;
+      border: 1px solid #ccc;
+      resize: none;
+    }
+
+    .scale-display {
+      font-weight: bold;
+      margin: 1rem 0;
+      color: #333;
+    }
+
+    .keyboard {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin: 1rem 0;
+    }
+
+    .key {
+      width: 40px;
+      height: 150px;
+      margin: 1px;
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      position: relative;
+      cursor: pointer;
+    }
+
+    .key.black {
+      background: black;
+      height: 100px;
+      width: 30px;
+      margin-left: -15px;
+      margin-right: -15px;
+      z-index: 1;
+      position: relative;
+      color: white;
+    }
+
+    .key-label {
+      position: absolute;
+      bottom: 5px;
+      left: 5px;
+      font-size: 0.8rem;
+    }
+
+    .alert {
+      margin-top: 0.5rem;
+      font-size: 1.2rem;
+      color: green;
+      display: none;
+    }
+
+    .highlight {
+      animation: highlight 0.8s ease;
+    }
+
+    @keyframes highlight {
+      0%   { background-color: #e0ffe0; }
+      100% { background-color: white; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <img src="logo.png" class="logo" alt="Logo MIDI2INCIPIT" />
+    <h1>MIDI2INCIPIT</h1>
+    <h2>Conversor MIDI para Graus</h2>
+
+    <div>
+      <label>Tonalidade:</label>
+      <select id="keySelect"></select>
+
+      <label>Modo:</label>
+      <select id="modeSelect">
+        <option value="major">Maior (Jônio)</option>
+        <option value="minor">Menor Natural (Eólio)</option>
+        <option value="dorian">Dórico</option>
+        <option value="phrygian">Frígio</option>
+        <option value="lydian">Lídio</option>
+        <option value="mixolydian">Mixolídio</option>
+        <option value="locrian">Lócrio</option>
+      </select>
+    </div>
+
+    <div class="scale-display" id="scaleDisplay">Escala atual: -</div>
+
+    <div class="keyboard" id="keyboard"></div>
+
+    <textarea id="output" readonly></textarea>
+    <div class="alert" id="noteLimitAlert">Já há 15 notas! Você pode copiar.</div>
+    <div class="alert" id="copyAlert">Incipit copiado!</div>
+
+    <button onclick="copyText()">Copiar</button>
+    <button onclick="clearText()">Limpar</button>
+  </div>
+
+  <script>
+    const noteNames = ['C', 'C#/Db', 'D', 'D#/Eb', 'E', 'F', 'F#/Gb', 'G', 'G#/Ab', 'A', 'A#/Bb', 'B'];
+
+    const modes = {
+      major:      [0, 2, 4, 5, 7, 9, 11],
+      minor:      [0, 2, 3, 5, 7, 8, 10],
+      dorian:     [0, 2, 3, 5, 7, 9, 10],
+      phrygian:   [0, 1, 3, 5, 7, 8, 10],
+      lydian:     [0, 2, 4, 6, 7, 9, 11],
+      mixolydian: [0, 2, 4, 5, 7, 9, 10],
+      locrian:    [0, 1, 3, 5, 6, 8, 10]
+    };
+
+    const keySelect = document.getElementById('keySelect');
+    const modeSelect = document.getElementById('modeSelect');
+    const output = document.getElementById('output');
+    const scaleDisplay = document.getElementById('scaleDisplay');
+    const keyboardDiv = document.getElementById('keyboard');
+    const noteLimitAlert = document.getElementById('noteLimitAlert');
+    const copyAlert = document.getElementById('copyAlert');
+
+    let currentKey = 0;
+    let currentMode = 'major';
+    let outputBuffer = '';
+    let groupCount = 0;
+    let noteCount = 0;
+
+    function updateScaleDisplay() {
+      const keyName = noteNames[currentKey];
+      const intervals = modes[currentMode];
+      const scale = intervals.map(i => noteNames[(currentKey + i) % 12]);
+      scaleDisplay.innerText = `Escala atual: ${keyName} (${currentMode}) → ${scale.join(', ')}`;
+    }
+
+    function noteToDegree(note) {
+      const pitch = note % 12;
+      const scale = modes[currentMode].map(i => (currentKey + i) % 12);
+      const degree = scale.indexOf(pitch);
+      return degree >= 0 ? degree + 1 : null;
+    }
+
+    function handleNoteInput(note) {
+      const degree = noteToDegree(note);
+      if (degree !== null && noteCount < 15) {
+        outputBuffer += degree;
+        groupCount++;
+        noteCount++;
+        if (groupCount === 5) {
+          outputBuffer += ' ';
+          groupCount = 0;
+        }
+        output.value = outputBuffer;
+
+        if (noteCount === 15) {
+          noteLimitAlert.style.display = 'block';
+          output.classList.add('highlight');
+          setTimeout(() => output.classList.remove('highlight'), 800);
+        }
+      }
+    }
+
+    function createKeyboard() {
+      const whiteNotes = [0, 2, 4, 5, 7, 9, 11];
+      const blackNotes = [1, 3, null, 6, 8, 10, null];
+
+      for (let i = 0; i < 7; i++) {
+        const noteNumber = whiteNotes[i];
+        const whiteKey = document.createElement('div');
+        whiteKey.className = 'key white';
+        whiteKey.innerHTML = `<div class="key-label">${noteNames[noteNumber]}</div>`;
+        whiteKey.onclick = () => handleNoteInput(noteNumber);
+        keyboardDiv.appendChild(whiteKey);
+
+        const blackNote = blackNotes[i];
+        if (blackNote !== null) {
+          const blackKey = document.createElement('div');
+          blackKey.className = 'key black';
+          blackKey.innerHTML = `<div class="key-label">${noteNames[blackNote]}</div>`;
+          blackKey.onclick = () => handleNoteInput(blackNote);
+          keyboardDiv.appendChild(blackKey);
+        }
+      }
+    }
+
+    function copyText() {
+      navigator.clipboard.writeText(output.value);
+      copyAlert.style.display = 'block';
+      setTimeout(() => {
+        copyAlert.style.display = 'none';
+      }, 1500);
+    }
+
+    function clearText() {
+      output.value = '';
+      outputBuffer = '';
+      groupCount = 0;
+      noteCount = 0;
+      noteLimitAlert.style.display = 'none';
+      copyAlert.style.display = 'none';
+    }
+
+    async function setupMIDI() {
+      if (navigator.requestMIDIAccess) {
+        const midi = await navigator.requestMIDIAccess();
+        for (let input of midi.inputs.values()) {
+          input.onmidimessage = (event) => {
+            const [cmd, note, velocity] = event.data;
+            if (cmd === 144 && velocity > 0) {
+              handleNoteInput(note);
+            }
+          };
+        }
+      }
+    }
+
+    // Inicialização
+    noteNames.forEach((note, i) => {
+      const option = document.createElement('option');
+      option.value = i;
+      option.text = note;
+      keySelect.appendChild(option);
+    });
+
+    keySelect.onchange = () => {
+      currentKey = parseInt(keySelect.value);
+      updateScaleDisplay();
+    };
+
+    modeSelect.onchange = () => {
+      currentMode = modeSelect.value;
+      updateScaleDisplay();
+    };
+
+    updateScaleDisplay();
+    setupMIDI();
+    createKeyboard();
+  </script>
+</body>
+</html>
 
